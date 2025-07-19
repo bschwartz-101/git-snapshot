@@ -1,0 +1,16 @@
+[project]
+name = "git-snapshot"
+version = "0.1.0"
+description = "A command-line tool to create clean .7z snapshots of local Git repositories, respecting .gitignore rules."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "py7zr==0.21.0",    # Pinning a version for consistency, can be updated later
+    "pathspec==0.12.1", # Pinning a version for consistency
+]
+
+[project.scripts]
+git-snapshot = "git_snapshot:main"
+
+[tool.uv]
+package = true
