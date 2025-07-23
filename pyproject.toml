@@ -1,16 +1,14 @@
 [project]
 name = "git-snapshot"
-version = "0.1.0"
+version = "0.2.0"
 description = "A command-line tool to create clean .7z snapshots of local Git repositories, respecting .gitignore rules."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["py7zr", "pathspec", "click>=8.2.1"]
+dependencies = [ "py7zr", "pathspec", "click>=8.2.1" ]
 
 [project.scripts]
-git-snapshot = "git_snapshot:main"
+git-snapshot = "git_snapshot.cli:main" # Point to the main function in the new 'cli' module
 
-[tool.uv]
-package = true
-
-[tool.setuptools]
-py-modules = ["git_snapshot"]
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
