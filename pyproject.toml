@@ -3,12 +3,8 @@ name = "git-snapshot"
 version = "0.1.0"
 description = "A command-line tool to create clean .7z snapshots of local Git repositories, respecting .gitignore rules."
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = [
-    "py7zr",
-    "pathspec",
-    "click>=8.2.1",
-]
+requires-python = ">=3.10"
+dependencies = ["py7zr", "pathspec", "click>=8.2.1"]
 
 [project.scripts]
 git-snapshot = "git_snapshot:main"
@@ -17,6 +13,4 @@ git-snapshot = "git_snapshot:main"
 package = true
 
 [tool.setuptools]
-# Explicitly list your main script file as a Python module
-# The name here should be without the .py extension
 py-modules = ["git_snapshot"]
