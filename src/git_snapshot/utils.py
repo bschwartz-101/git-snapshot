@@ -7,10 +7,10 @@ from pathlib import Path
 
 import click
 import py7zr
-from pathspec import PathSpec
-from pathspec.patterns import GitWildMatchPattern
 
 from git_snapshot.exceptions import GitSnapshotException
+
+# Removed: _check_py7zr_installed() function
 
 
 def get_git_root(path: Path) -> Path | None:
@@ -46,9 +46,7 @@ def parse_gitignore(repo_root: Path, verbose: bool = False) -> list[str]:
     gitignore_path = repo_root / ".gitignore"
     if not gitignore_path.is_file():
         if verbose:
-            click.echo(
-                "Warning: .gitignore not found. Proceeding without exclusions."
-            )
+            click.echo("Warning: .gitignore not found. Proceeding without exclusions.")
         return []
 
     try:
@@ -63,7 +61,7 @@ def parse_gitignore(repo_root: Path, verbose: bool = False) -> list[str]:
     except Exception as e:
         click.echo(
             f"Error reading .gitignore at {gitignore_path}: {e}. Proceeding without exclusions.",
-            err=True
+            err=True,
         )
         return []
 
@@ -93,7 +91,9 @@ def _handle_remove_read_only(func, path: str, exc_info: tuple):
         raise exc_info[1]
 
 
-def _remove_directory_robustly(path: Path, retries: int = 5, delay: float = 0.1, verbose: bool = False):
+def _remove_directory_robustly(
+    path: Path, retries: int = 5, delay: float = 0.1, verbose: bool = False
+):
     """
     Attempts to remove a directory robustly, handling PermissionError by changing permissions
     and implementing a retry mechanism with exponential backoff.
@@ -131,7 +131,9 @@ def _remove_directory_robustly(path: Path, retries: int = 5, delay: float = 0.1,
     )
 
 
-def _clear_directory_contents(target_dir: Path, exclusions: list[Path], verbose: bool = False):
+def _clear_directory_contents(
+    target_dir: Path, exclusions: list[Path], verbose: bool = False
+):
     """
     Clears the contents of target_dir, excluding paths in the exclusions list.
     Exclusions should be resolved paths.
@@ -149,7 +151,9 @@ def _clear_directory_contents(target_dir: Path, exclusions: list[Path], verbose:
     for item in target_dir.iterdir():
         if item.resolve() in resolved_exclusions:
             if verbose:
-                click.echo(f"Skipping removal of protected directory/file: '{item.name}'")
+                click.echo(
+                    f"Skipping removal of protected directory/file: '{item.name}'"
+                )
             continue
 
         if item.is_file():
@@ -160,17 +164,24 @@ def _clear_directory_contents(target_dir: Path, exclusions: list[Path], verbose:
                     f"Warning: Could not remove file '{item}': {file_e}", err=True
                 )
         elif item.is_dir():
-            _remove_directory_robustly(item, verbose=verbose)  # Recursively remove subdirectories robustly
+            _remove_directory_robustly(
+                item, verbose=verbose
+            )  # Recursively remove subdirectories robustly
 
 
-def _stash_directory_state(directory_to_stash: Path, stash_base_dir: Path, verbose: bool = False) -> Path | None:
+def _stash_directory_state(
+    directory_to_stash: Path, stash_base_dir: Path, verbose: bool = False
+) -> Path | None:
     """
     Creates a temporary 7z snapshot (stash) of the given directory's current state.
     This is used during restoration to provide a rollback point if restoration fails.
+    The stash is created within the provided `stash_base_dir`, which is typically
+    a temporary directory managed by `tempfile.TemporaryDirectory`.
 
     Args:
         directory_to_stash (Path): The directory whose contents need to be stashed.
         stash_base_dir (Path): The base directory where temporary stashes will be stored.
+                               This should ideally be a path within a `tempfile.TemporaryDirectory`.
         verbose (bool): If True, print verbose messages.
 
     Returns:
@@ -182,27 +193,26 @@ def _stash_directory_state(directory_to_stash: Path, stash_base_dir: Path, verbo
     """
     if verbose:
         click.echo(f"Creating a temporary stash of '{directory_to_stash}'...")
-    try:
-        stash_base_dir.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        raise GitSnapshotException(f"Error creating stash directory '{stash_base_dir}': {e}") from e
+    # No need to create stash_base_dir explicitly here, it's managed by TemporaryDirectory in core.py
 
-    timestamp = time.strftime("%Y%m%d_%H%M%S") # Using time.strftime for consistency with older datetime usage
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
     stash_filename = f"restore_stash_{timestamp}.7z"
     stash_filepath = stash_base_dir / stash_filename
 
     try:
         if not directory_to_stash.is_dir() or not any(directory_to_stash.iterdir()):
             if verbose:
-                click.echo(f"Directory '{directory_to_stash}' is empty or does not exist. No stash created.")
+                click.echo(
+                    f"Directory '{directory_to_stash}' is empty or does not exist. No stash created."
+                )
             return None
 
         with py7zr.SevenZipFile(stash_filepath, "w") as archive:
             for item in directory_to_stash.iterdir():
-                # Avoid stashing the stash directory itself if it's inside the target_dir,
-                # or the main snapshots directory. Use resolve() for robust comparison.
-                if item.resolve() == stash_base_dir.resolve() or \
-                   item.resolve() == (Path.cwd() / "snapshots").resolve(): # Assuming snapshots dir is relative to CWD
+                # Avoid stashing the main snapshots directory if it happens to be inside
+                # directory_to_stash, though unlikely for typical use cases.
+                # The stash_base_dir itself (temp dir) should never be inside directory_to_stash.
+                if item.resolve() == (Path.cwd() / "snapshots").resolve():
                     continue
 
                 if item.is_file():
@@ -212,13 +222,21 @@ def _stash_directory_state(directory_to_stash: Path, stash_base_dir: Path, verbo
                         current_root_path = Path(root)
                         for f in files:
                             full_path = current_root_path / f
-                            relative_path_in_stash = full_path.relative_to(directory_to_stash)
-                            archive.write(full_path, arcname=str(relative_path_in_stash))
+                            relative_path_in_stash = full_path.relative_to(
+                                directory_to_stash
+                            )
+                            archive.write(
+                                full_path, arcname=str(relative_path_in_stash)
+                            )
         return stash_filepath
     except Exception as e:
-        if stash_filepath.exists(): # Check if it was partially created
-            stash_filepath.unlink()  # Clean up incomplete stash
-        raise GitSnapshotException(f"Error creating stash for '{directory_to_stash}': {e}") from e
+        # If stash_filepath was partially created, delete it.
+        # The temporary directory itself will be cleaned up by the caller's context manager.
+        if stash_filepath.exists():
+            stash_filepath.unlink()
+        raise GitSnapshotException(
+            f"Error creating stash for '{directory_to_stash}': {e}"
+        ) from e
 
 
 def _revert_from_stash(stash_filepath: Path, target_dir: Path, verbose: bool = False):
@@ -241,13 +259,10 @@ def _revert_from_stash(stash_filepath: Path, target_dir: Path, verbose: bool = F
 
     click.echo(f"Attempting to revert '{target_dir}' from stash.")
     try:
-        # Define paths to exclude from clearing
-        # The stash_filepath.parent is the .temp_stashes directory
-        # Path.cwd() / "snapshots" is the main snapshots directory
-        exclusions_for_clear = [
-            stash_filepath.parent.resolve(),
-            (Path.cwd() / "snapshots").resolve(),  # Ensure this is absolute
-        ]
+        # Exclusions for clearing should now only include the main snapshots directory
+        # as the temporary stash directory is outside the main target directory's scope
+        # and managed by `tempfile`.
+        exclusions_for_clear = [(Path.cwd() / "snapshots").resolve()]
         _clear_directory_contents(target_dir, exclusions_for_clear, verbose=verbose)
 
         # Recreate the empty target_dir if needed
@@ -280,9 +295,14 @@ def _remove_dir_if_empty(path: Path, description: str, verbose: bool = False):
                     click.echo(f"Cleaned up empty {description} directory: {path}")
             else:
                 if verbose:
-                    click.echo(f"{description} directory '{path}' is not empty, skipping removal.")
+                    click.echo(
+                        f"{description} directory '{path}' is not empty, skipping removal."
+                    )
         except OSError as e:
-            click.echo(f"Warning: Could not remove empty {description} directory '{path}': {e}", err=True)
+            click.echo(
+                f"Warning: Could not remove empty {description} directory '{path}': {e}",
+                err=True,
+            )
 
 
 def _get_archive_app_name(snapshot_filepath: Path, verbose: bool) -> str:
@@ -308,16 +328,22 @@ def _get_archive_app_name(snapshot_filepath: Path, verbose: bool) -> str:
             found_any_item = False
             for item_info in z.list():
                 found_any_item = True
-                parts = item_info.filename.split('/')
+                parts = item_info.filename.split("/")
                 if parts and parts[0]:
                     archive_app_name = parts[0]
                     break
             if not found_any_item:
-                raise GitSnapshotException("Snapshot appears to be empty or does not contain any entries.")
+                raise GitSnapshotException(
+                    "Snapshot appears to be empty or does not contain any entries."
+                )
             if not archive_app_name:
-                click.echo("Warning: Could not determine top-level directory name in snapshot. Contents will be extracted directly into the output directory.")
+                click.echo(
+                    "Warning: Could not determine top-level directory name in snapshot. Contents will be extracted directly into the output directory."
+                )
         if verbose and archive_app_name:
-            click.echo(f"Detected top-level directory '{archive_app_name}' within snapshot.")
+            click.echo(
+                f"Detected top-level directory '{archive_app_name}' within snapshot."
+            )
         return archive_app_name
     except Exception as e:
         raise GitSnapshotException(

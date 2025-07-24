@@ -1,6 +1,7 @@
 # src/git_snapshot/core.py
 import datetime
 import os
+import tempfile
 from pathlib import Path
 
 import click
@@ -10,14 +11,14 @@ from pathspec.patterns import GitWildMatchPattern
 
 from git_snapshot.exceptions import GitSnapshotException
 from git_snapshot.utils import (
+    _clear_directory_contents,
+    _get_archive_app_name,
+    _remove_dir_if_empty,
+    _remove_directory_robustly,
+    _revert_from_stash,
+    _stash_directory_state,
     get_git_root,
     parse_gitignore,
-    _remove_directory_robustly,
-    _clear_directory_contents,
-    _stash_directory_state,
-    _revert_from_stash,
-    _remove_dir_if_empty,
-    _get_archive_app_name
 )
 
 
@@ -107,11 +108,15 @@ def _create_snapshot_logic(source_path: Path, output_dir: Path, verbose: bool = 
             relative_dir_path = dir_path_abs.relative_to(repo_root)
             # gitignore patterns can apply to directories.
             # The trailing os.sep is important for matching directory patterns like 'my_dir/'
-            if spec.match_file(str(relative_dir_path) + os.sep) or spec.match_file(str(relative_dir_path)):
+            if spec.match_file(str(relative_dir_path) + os.sep) or spec.match_file(
+                str(relative_dir_path)
+            ):
                 dirs_to_remove.append(d)
 
         for d_remove in dirs_to_remove:
-            dirs.remove(d_remove)  # Modify dirs in-place for os.walk to skip ignored directories
+            dirs.remove(
+                d_remove
+            )  # Modify dirs in-place for os.walk to skip ignored directories
 
         for f in files:
             file_path_abs = current_path / f
@@ -149,14 +154,21 @@ def _create_snapshot_logic(source_path: Path, output_dir: Path, verbose: bool = 
     except Exception as e:
         if output_filepath.exists():
             output_filepath.unlink()  # Clean up incomplete archive
-        raise GitSnapshotException(f"An unexpected error occurred during compression: {e}") from e
+        raise GitSnapshotException(
+            f"An unexpected error occurred during compression: {e}"
+        ) from e
 
 
-def _restore_snapshot_logic(snapshot_filepath: Path, output_dir: Path, verbose: bool = False, keep_venv: bool = False):
+def _restore_snapshot_logic(
+    snapshot_filepath: Path,
+    output_dir: Path,
+    verbose: bool = False,
+    keep_venv: bool = False,
+):
     """
     Core logic to restore a .7z snapshot to a local directory.
-    This function handles stashing the current state, clearing the target directory,
-    extracting the snapshot, and attempting to revert on failure.
+    This function handles stashing the current state in a temporary filesystem,
+    clearing the target directory, extracting the snapshot, and attempting to revert on failure.
 
     Args:
         snapshot_filepath (Path): The path to the snapshot file to restore.
@@ -170,97 +182,126 @@ def _restore_snapshot_logic(snapshot_filepath: Path, output_dir: Path, verbose: 
     resolved_output_dir = output_dir.resolve()
 
     if not snapshot_filepath.is_file():
-        raise GitSnapshotException(f"Error: Snapshot file '{snapshot_filepath}' not found.")
+        raise GitSnapshotException(
+            f"Error: Snapshot file '{snapshot_filepath}' not found."
+        )
 
     archive_app_name = _get_archive_app_name(snapshot_filepath, verbose)
-    target_app_path = resolved_output_dir / archive_app_name if archive_app_name else resolved_output_dir
+    target_app_path = (
+        resolved_output_dir / archive_app_name
+        if archive_app_name
+        else resolved_output_dir
+    )
 
     try:
         resolved_output_dir.mkdir(parents=True, exist_ok=True)
         if verbose:
             click.echo(f"Ensured output directory exists: {resolved_output_dir}")
     except Exception as e:
-        raise GitSnapshotException(f"Error: Could not ensure output directory '{resolved_output_dir}': {e}") from e
-
-    temp_stashes_base_dir = Path.cwd() / "snapshots/.temp_stashes"
-    try:
-        temp_stashes_base_dir.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        raise GitSnapshotException(f"Error creating temporary stash directory '{temp_stashes_base_dir}': {e}") from e
+        raise GitSnapshotException(
+            f"Error: Could not ensure output directory '{resolved_output_dir}': {e}"
+        ) from e
 
     stash_filepath: Path | None = None
-    try:
-        if target_app_path.is_dir():
-            if verbose:
-                click.echo(f"Stashing existing contents of '{target_app_path}'...")
-            stash_filepath = _stash_directory_state(target_app_path, temp_stashes_base_dir, verbose=verbose)
-            if stash_filepath:
+    # Use TemporaryDirectory for the stash base directory
+    with tempfile.TemporaryDirectory() as temp_dir_str:
+        temp_stash_base_dir = Path(temp_dir_str)
+        try:
+            if target_app_path.is_dir():
                 if verbose:
-                    click.echo(f"Temporary stash created at: {stash_filepath}")
+                    click.echo(
+                        f"Stashing existing contents of '{target_app_path}' in temporary location..."
+                    )
+                # Pass the temporary directory path to _stash_directory_state
+                stash_filepath = _stash_directory_state(
+                    target_app_path, temp_stash_base_dir, verbose=verbose
+                )
+                if stash_filepath:
+                    if verbose:
+                        click.echo(f"Temporary stash created at: {stash_filepath}")
+                else:
+                    if verbose:
+                        click.echo(
+                            f"'{target_app_path}' is empty or does not exist, no stash created."
+                        )
             else:
                 if verbose:
-                    click.echo(f"'{target_app_path}' is empty or does not exist, no stash created.")
-        else:
-            if verbose:
-                click.echo(f"Target application directory '{target_app_path}' does not exist, no stash needed.")
+                    click.echo(
+                        f"Target application directory '{target_app_path}' does not exist, no stash needed."
+                    )
 
-        exclusions_for_clear = [
-            temp_stashes_base_dir.resolve(),
-            (Path.cwd() / "snapshots").resolve(), # Ensure this is absolute
-        ]
+            # Exclusions for clearing should now only include the main snapshots directory
+            # as the temporary stash directory is outside the main target directory's scope
+            # and managed by `tempfile`.
+            exclusions_for_clear = [(Path.cwd() / "snapshots").resolve()]
 
-        if keep_venv:
-            venv_path_in_target = target_app_path / ".venv"
-            if venv_path_in_target.is_dir():
-                exclusions_for_clear.append(venv_path_in_target.resolve())
+            if keep_venv:
+                venv_path_in_target = target_app_path / ".venv"
+                if venv_path_in_target.is_dir():
+                    exclusions_for_clear.append(venv_path_in_target.resolve())
+                    if verbose:
+                        click.echo(
+                            f"Keeping existing .venv directory at {venv_path_in_target}"
+                        )
+
+            if target_app_path.is_dir():
                 if verbose:
-                    click.echo(f"Keeping existing .venv directory at {venv_path_in_target}")
-
-        if target_app_path.is_dir():
-            if verbose:
-                click.echo(f"Clearing existing contents of '{target_app_path}' before restoration...")
-            _clear_directory_contents(target_app_path, exclusions_for_clear, verbose=verbose)
-        else:
-            if verbose:
-                click.echo(f"'{target_app_path}' does not exist, no need to clear before extraction.")
-
-        target_app_path.mkdir(parents=True, exist_ok=True)
-
-        click.echo(f"Restoring snapshot '{snapshot_filepath}' to '{resolved_output_dir}'...")
-
-        with py7zr.SevenZipFile(snapshot_filepath, mode="r") as z:
-            z.extractall(path=resolved_output_dir)
-
-        click.echo(f"Snapshot restored successfully to {target_app_path}")
-
-    except Exception as e:
-        click.echo(f"Restoration failed: {e}", err=True)
-        if stash_filepath and stash_filepath.exists():
-            click.echo("Attempting to automatically revert to previous state...")
-            try:
-                _revert_from_stash(stash_filepath, target_app_path, verbose=verbose)
-            except Exception as revert_e:
-                click.echo(f"Automatic revert also failed: {revert_e}", err=True)
-                click.echo("Manual intervention may be required to restore previous state.", err=True)
-        else:
-            click.echo("No stash found or stash creation failed, cannot revert automatically.", err=True)
-
-        if target_app_path.is_dir() and target_app_path.exists():
-            click.echo(f"Cleaning up partially extracted files at: {target_app_path}", err=True)
-            _remove_directory_robustly(target_app_path, verbose=verbose)
-
-        # Re-raise as GitSnapshotException to exit cleanly via Click
-        raise GitSnapshotException("Restoration failed, see logs above for details.") from e
-
-    finally:
-        if stash_filepath and stash_filepath.exists():
-            try:
-                stash_filepath.unlink()
+                    click.echo(
+                        f"Clearing existing contents of '{target_app_path}' before restoration..."
+                    )
+                _clear_directory_contents(
+                    target_app_path, exclusions_for_clear, verbose=verbose
+                )
+            else:
                 if verbose:
-                    click.echo(f"Stash file '{stash_filepath}' deleted.")
-            except Exception as e:
-                click.echo(f"Warning: Could not delete stash file '{stash_filepath}': {e}", err=True)
+                    click.echo(
+                        f"'{target_app_path}' does not exist, no need to clear before extraction."
+                    )
 
-        _remove_dir_if_empty(temp_stashes_base_dir, "temporary stash", verbose=verbose)
-        snapshots_dir = Path.cwd() / "snapshots"
-        _remove_dir_if_empty(snapshots_dir, "snapshots", verbose=verbose)
+            target_app_path.mkdir(parents=True, exist_ok=True)
+
+            click.echo(
+                f"Restoring snapshot '{snapshot_filepath}' to '{resolved_output_dir}'..."
+            )
+
+            with py7zr.SevenZipFile(snapshot_filepath, mode="r") as z:
+                z.extractall(path=resolved_output_dir)
+
+            click.echo(f"Snapshot restored successfully to {target_app_path}")
+
+        except Exception as e:
+            click.echo(f"Restoration failed: {e}", err=True)
+            if stash_filepath and stash_filepath.exists():
+                click.echo("Attempting to automatically revert to previous state...")
+                try:
+                    _revert_from_stash(stash_filepath, target_app_path, verbose=verbose)
+                except Exception as revert_e:
+                    click.echo(f"Automatic revert also failed: {revert_e}", err=True)
+                    click.echo(
+                        "Manual intervention may be required to restore previous state.",
+                        err=True,
+                    )
+            else:
+                click.echo(
+                    "No stash found or stash creation failed, cannot revert automatically.",
+                    err=True,
+                )
+
+            if target_app_path.is_dir() and target_app_path.exists():
+                click.echo(
+                    f"Cleaning up partially extracted files at: {target_app_path}",
+                    err=True,
+                )
+                _remove_directory_robustly(target_app_path, verbose=verbose)
+
+            # Re-raise as GitSnapshotException to exit cleanly via Click
+            raise GitSnapshotException(
+                "Restoration failed, see logs above for details."
+            ) from e
+
+    # The temporary directory (temp_stash_base_dir) is automatically cleaned up here
+    # when the 'with tempfile.TemporaryDirectory()' block exits, regardless of success or failure.
+
+    # Only clean up the main 'snapshots' directory if it's empty after all operations.
+    snapshots_dir = Path.cwd() / "snapshots"
+    _remove_dir_if_empty(snapshots_dir, "snapshots", verbose=verbose)

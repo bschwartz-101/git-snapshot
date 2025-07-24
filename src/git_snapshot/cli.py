@@ -5,7 +5,8 @@ import click
 
 from git_snapshot.core import _create_snapshot_logic, _restore_snapshot_logic
 from git_snapshot.exceptions import GitSnapshotException
-from git_snapshot.utils import _check_py7zr_installed
+
+# Removed: from git_snapshot.utils import _check_py7zr_installed
 
 
 # Initialize the Click group
@@ -16,9 +17,9 @@ def cli():
     """
     Main entry point for the git-snapshot CLI application.
     This function serves as the Click group for subcommands.
-    Performs initial checks, such as verifying 'py7zr' installation.
     """
-    _check_py7zr_installed()
+    # Removed: _check_py7zr_installed()
+    pass
 
 
 @cli.command("create")
