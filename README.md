@@ -2,11 +2,14 @@
 
 A command-line interface (CLI) application designed to create clean snapshots of local Git repositories, respecting `.gitignore` rules and packaging the relevant files into a `.7z` archive. This tool also provides the ability to restore these snapshots, offering a robust solution for managing portable repository states.
 
+---
+
 ## Features
 
 * **Repository Snapshot Creation**: Generates a `.7z` archive of the current local Git repository.
 * **Repository Restore Functionality**: Restores a `.7z` snapshot to a specified local directory.
 * **Automatic Stash and Reroll**: Before restoration, the tool automatically stashes the current state of the target directory. If the restoration fails, it attempts to revert to this stashed state to prevent data loss.
+* **Accurate Git Repository Detection**: **Finds the Git repository root by locating the `.git` directory, ensuring correct context for snapshots.**
 * **Intelligent `.git` Directory Handling**: Automatically includes the `.git` directory in snapshots and ensures existing `.git` directories in the target restore location are handled for a clean restoration.
 * **`.gitignore` Compliance**: Reads and respects the **root** `.gitignore` file to exclude specified paths, ensuring only relevant files are included in snapshots.
 * **Dynamic Naming Convention**: Snapshots are automatically named `[repository_name]_snapshot_[YYYYMMDD]_[HHMMSS].7z`.
@@ -15,6 +18,8 @@ A command-line interface (CLI) application designed to create clean snapshots of
 * **Root Directory Detection in Snapshots**: Intelligently identifies the top-level directory name within the `.7z` archive for correct extraction, placing the repository content as expected.
 * **Verbose Output Option**: Control the level of detail in the console output.
 * **Option to Keep Virtual Environment**: During restoration, an option is available to prevent the removal of the `.venv` directory.
+
+---
 
 ## Installation
 
@@ -36,6 +41,8 @@ This application uses `uv` for dependency management, which simplifies installat
 
     This command installs the `git-snapshot` tool in editable mode, making it available globally via the `git-snapshot` command.
 
+---
+
 ## Usage
 
 The `git-snapshot` CLI uses subcommands for `create` and `restore` operations:
@@ -52,7 +59,7 @@ git-snapshot <command> [arguments]
 ### Create Command Arguments (`git-snapshot create`)
 
   * `--source <path>` / `-s <path>`: (Optional) Path to the local Git repository you want to snapshot. Defaults to the current working directory (`.`).
-  * `--output <path>` / `-o <path>`: (Optional) Directory where the generated `.7z` file will be saved. Defaults to `./snapshots/`.
+  * `--output <path>` / `-o <path>`: (Optional) Directory where the generated `.7z` file will be saved. **If not specified, the snapshot will be saved in a `snapshots/` subdirectory within the detected Git repository's root directory.**
   * `--verbose` / `-v`: (Optional) Enable verbose output, showing more details about the operation.
 
 ### Restore Command Arguments (`git-snapshot restore`)
@@ -64,13 +71,13 @@ git-snapshot <command> [arguments]
 
 ### Examples
 
-1.  **Create a snapshot of the current directory**:
+1.  **Create a snapshot of the current directory (default output)**:
 
     ```bash
     git-snapshot create
     ```
 
-    This will create a `.7z` archive of the Git repository in your current working directory and save it to the `./snapshots/` directory.
+    This will create a `.7z` archive of the Git repository found in your current working directory and save it to a `snapshots/` directory **inside that Git repository's root.**
 
 2.  **Create a snapshot of a specific repository and save to a different location**:
 
@@ -108,9 +115,13 @@ git-snapshot <command> [arguments]
     git-snapshot restore ./snapshots/my_repo_snapshot_20250720_143000.7z --keep-venv
     ```
 
+-----
+
 ## .gitignore Compliance
 
 The `create` command reads the `.gitignore` file located in the **root** of the Git repository. Files and directories matching the patterns specified in this `.gitignore` will be excluded from the snapshot. If no `.gitignore` file is found in the repository root, the snapshot will include all files.
+
+-----
 
 ## Output Naming Convention (for `create` command)
 
@@ -124,6 +135,8 @@ The generated `.7z` file will follow this format:
 
 **Example**: If your repository is named `my_cool_repo`, a snapshot might be named `my_cool_repo_snapshot_20250720_143000.7z`.
 
+-----
+
 ## Error Handling
 
 The application includes robust error handling for common scenarios:
@@ -136,10 +149,14 @@ The application includes robust error handling for common scenarios:
   * **Permission Issues**: Errors related to file permissions (e.g., inability to read files, write the archive, or modify directories during restore) will be reported.
   * **Insufficient Disk Space**: While not explicitly checked, system errors for disk space will propagate.
 
+-----
+
 ## Future Considerations (Post-MVP)
 
   * Support for additional compression formats (e.g., `.zip`, `.tar.gz`).
   * Interactive mode for guiding users through snapshot creation/restoration.
+
+-----
 
 ## License
 

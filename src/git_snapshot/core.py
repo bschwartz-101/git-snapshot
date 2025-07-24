@@ -13,7 +13,6 @@ from git_snapshot.exceptions import GitSnapshotException
 from git_snapshot.utils import (
     _clear_directory_contents,
     _get_archive_app_name,
-    _remove_dir_if_empty,
     _remove_directory_robustly,
     _revert_from_stash,
     _stash_directory_state,
@@ -36,10 +35,11 @@ def _create_snapshot_logic(source_path: Path, output_dir: Path, verbose: bool = 
 
     Raises:
         GitSnapshotException: If the source path is not a Git repository, output directory issues occur,
-                              or compression fails.
+                                or compression fails.
     """
     repo_root = get_git_root(source_path)
     if not repo_root:
+        # This check is duplicated with cli.py, but kept for standalone robustness
         raise GitSnapshotException(
             f"'{source_path}' is not a valid Git repository or not within one."
         )
@@ -230,10 +230,9 @@ def _restore_snapshot_logic(
                         f"Target application directory '{target_app_path}' does not exist, no stash needed."
                     )
 
-            # Exclusions for clearing should now only include the main snapshots directory
-            # as the temporary stash directory is outside the main target directory's scope
-            # and managed by `tempfile`.
-            exclusions_for_clear = [(Path.cwd() / "snapshots").resolve()]
+            # Exclusions for clearing should now only include the .venv if keep_venv is true.
+            # The 'snapshots' directory exclusion is removed as it's not relevant here.
+            exclusions_for_clear: list[Path] = []
 
             if keep_venv:
                 venv_path_in_target = target_app_path / ".venv"
@@ -302,6 +301,6 @@ def _restore_snapshot_logic(
     # The temporary directory (temp_stash_base_dir) is automatically cleaned up here
     # when the 'with tempfile.TemporaryDirectory()' block exits, regardless of success or failure.
 
-    # Only clean up the main 'snapshots' directory if it's empty after all operations.
-    snapshots_dir = Path.cwd() / "snapshots"
-    _remove_dir_if_empty(snapshots_dir, "snapshots", verbose=verbose)
+    # Removed: Clean up the main 'snapshots' directory, as it's not relevant for restore.
+    # snapshots_dir = Path.cwd() / "snapshots"
+    # _remove_dir_if_empty(snapshots_dir, "snapshots", verbose=verbose)

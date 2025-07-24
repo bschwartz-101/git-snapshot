@@ -16,6 +16,8 @@ from git_snapshot.exceptions import GitSnapshotException
 def get_git_root(path: Path) -> Path | None:
     """
     Finds the root of the Git repository from the given path.
+    It does this by searching for the '.git' directory in the provided path
+    and its parent directories.
 
     Args:
         path (Path): The starting path to search for the Git repository root.
@@ -24,7 +26,9 @@ def get_git_root(path: Path) -> Path | None:
         Path | None: The path to the Git repository root if found, otherwise None.
     """
     current_path = path.resolve()
-    while current_path != current_path.parent:
+    while (
+        current_path != current_path.parent
+    ):  # Stop at the root directory (e.g., '/' or 'C:\')
         if (current_path / ".git").is_dir():
             return current_path
         current_path = current_path.parent
@@ -212,9 +216,9 @@ def _stash_directory_state(
                 # Avoid stashing the main snapshots directory if it happens to be inside
                 # directory_to_stash, though unlikely for typical use cases.
                 # The stash_base_dir itself (temp dir) should never be inside directory_to_stash.
-                if item.resolve() == (Path.cwd() / "snapshots").resolve():
-                    continue
-
+                # The `Path.cwd() / "snapshots"` exclusion is removed as it's not robust.
+                # Stashing should capture the current state of directory_to_stash,
+                # if snapshots dir is inside, it should be stashed.
                 if item.is_file():
                     archive.write(item, arcname=item.name)
                 elif item.is_dir():
@@ -259,10 +263,9 @@ def _revert_from_stash(stash_filepath: Path, target_dir: Path, verbose: bool = F
 
     click.echo(f"Attempting to revert '{target_dir}' from stash.")
     try:
-        # Exclusions for clearing should now only include the main snapshots directory
-        # as the temporary stash directory is outside the main target directory's scope
-        # and managed by `tempfile`.
-        exclusions_for_clear = [(Path.cwd() / "snapshots").resolve()]
+        # Exclusions for clearing should only be for .venv if it's explicitly kept.
+        # The 'snapshots' directory exclusion is removed as it's not relevant here.
+        exclusions_for_clear: list[Path] = []
         _clear_directory_contents(target_dir, exclusions_for_clear, verbose=verbose)
 
         # Recreate the empty target_dir if needed

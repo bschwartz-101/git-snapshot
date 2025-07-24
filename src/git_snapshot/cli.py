@@ -5,6 +5,7 @@ import click
 
 from git_snapshot.core import _create_snapshot_logic, _restore_snapshot_logic
 from git_snapshot.exceptions import GitSnapshotException
+from git_snapshot.utils import get_git_root  # Import get_git_root
 
 # Removed: from git_snapshot.utils import _check_py7zr_installed
 
@@ -36,23 +37,43 @@ def cli():
     "-o",
     "--output",
     type=click.Path(file_okay=False, dir_okay=True, writable=True, path_type=Path),
-    default=Path("./snapshots"),
-    help="Directory to save the generated .7z file. Defaults to './snapshots/'.",
+    default=None,  # Changed default to None
+    help="Directory to save the generated .7z file. Defaults to './snapshots/' within the Git repository root.",
 )
 @click.option(
     "-v", "--verbose", is_flag=True, default=False, help="Enable verbose output."
 )
-def create_command(source: Path, output: Path, verbose: bool):
+def create_command(
+    source: Path, output: Path | None, verbose: bool
+):  # Changed type hint
     """
     Create a .7z snapshot of a local Git repository, respecting .gitignore rules.
     Automatically excludes the output directory if it's within the repository.
 
     Args:
         source (Path): Path to the local Git repository.
-        output (Path): Directory to save the generated .7z file.
+        output (Path | None): Directory to save the generated .7z file.
         verbose (bool): Enable verbose output.
     """
-    _create_snapshot_logic(source, output, verbose)
+    repo_root = get_git_root(source)
+    if not repo_root:
+        raise GitSnapshotException(
+            f"'{source}' is not a valid Git repository or not within one."
+        )
+
+    final_output_dir: Path
+    if output is None:
+        final_output_dir = repo_root / "snapshots"
+        if verbose:
+            click.echo(
+                f"Using default output directory: {final_output_dir} (inside Git root)"
+            )
+    else:
+        final_output_dir = output
+        if verbose:
+            click.echo(f"Using specified output directory: {final_output_dir}")
+
+    _create_snapshot_logic(source, final_output_dir, verbose)
 
 
 @cli.command("restore")
