@@ -5,12 +5,9 @@ import click
 
 from git_snapshot.core import _create_snapshot_logic, _restore_snapshot_logic
 from git_snapshot.exceptions import GitSnapshotException
-from git_snapshot.utils import get_git_root  # Import get_git_root
-
-# Removed: from git_snapshot.utils import _check_py7zr_installed
+from git_snapshot.utils import get_git_root
 
 
-# Initialize the Click group
 @click.group(
     help="Create a .7z snapshot of a local Git repository, respecting .gitignore rules, or restore one."
 )
@@ -19,7 +16,6 @@ def cli():
     Main entry point for the git-snapshot CLI application.
     This function serves as the Click group for subcommands.
     """
-    # Removed: _check_py7zr_installed()
     pass
 
 
@@ -37,15 +33,13 @@ def cli():
     "-o",
     "--output",
     type=click.Path(file_okay=False, dir_okay=True, writable=True, path_type=Path),
-    default=None,  # Changed default to None
+    default=None,
     help="Directory to save the generated .7z file. Defaults to './snapshots/' within the Git repository root.",
 )
 @click.option(
     "-v", "--verbose", is_flag=True, default=False, help="Enable verbose output."
 )
-def create_command(
-    source: Path, output: Path | None, verbose: bool
-):  # Changed type hint
+def create_command(source: Path, output: Path | None, verbose: bool):
     """
     Create a .7z snapshot of a local Git repository, respecting .gitignore rules.
     Automatically excludes the output directory if it's within the repository.
@@ -121,11 +115,9 @@ def main():
         cli()
     except GitSnapshotException as e:
         click.echo(f"Error: {e.message}", err=True)
-        # Click handles exiting with status code 1 for ClickExceptions
     except Exception as e:
-        # Catch any other unexpected, unhandled exceptions
         click.echo(f"An unexpected fatal error occurred: {e}", err=True)
-        click.Abort()  # Abort the Click program, which exits with 1
+        click.Abort()
 
 
 if __name__ == "__main__":

@@ -39,7 +39,6 @@ def _create_snapshot_logic(source_path: Path, output_dir: Path, verbose: bool = 
     """
     repo_root = get_git_root(source_path)
     if not repo_root:
-        # This check is duplicated with cli.py, but kept for standalone robustness
         raise GitSnapshotException(
             f"'{source_path}' is not a valid Git repository or not within one."
         )
@@ -51,7 +50,6 @@ def _create_snapshot_logic(source_path: Path, output_dir: Path, verbose: bool = 
     gitignore_patterns = parse_gitignore(repo_root, verbose=verbose)
     all_patterns_for_spec = list(gitignore_patterns)
 
-    # Automatically exclude the output directory if it's within the repository
     abs_output_dir = output_dir.resolve()
     try:
         if abs_output_dir.is_relative_to(repo_root):
@@ -63,8 +61,8 @@ def _create_snapshot_logic(source_path: Path, output_dir: Path, verbose: bool = 
                     click.echo(
                         f"Automatically excluding output directory '{relative_output_path_str}' from snapshot."
                     )
-    except ValueError:  # output_dir is not relative to repo_root
-        pass  # No need to exclude if it's outside the repository
+    except ValueError:
+        pass
 
     spec = PathSpec.from_lines(GitWildMatchPattern, all_patterns_for_spec)
 
@@ -81,7 +79,6 @@ def _create_snapshot_logic(source_path: Path, output_dir: Path, verbose: bool = 
 
     actual_files_to_archive_relative: list[Path] = []
 
-    # Explicitly add all contents of the .git directory
     git_path_in_repo = repo_root / ".git"
     if git_path_in_repo.is_dir():
         if verbose:
@@ -93,30 +90,23 @@ def _create_snapshot_logic(source_path: Path, output_dir: Path, verbose: bool = 
                 relative_path = full_path.relative_to(repo_root)
                 actual_files_to_archive_relative.append(relative_path)
 
-    # Walk through the rest of the repository root and filter files
     for root, dirs, files in os.walk(repo_root):
         current_path = Path(root)
 
-        # Filter out .git from main walk if it's at repo_root level
         if current_path == repo_root and ".git" in dirs:
             dirs.remove(".git")
 
-        # Filter directories to not descend into ignored ones
         dirs_to_remove = []
         for d in dirs:
             dir_path_abs = current_path / d
             relative_dir_path = dir_path_abs.relative_to(repo_root)
-            # gitignore patterns can apply to directories.
-            # The trailing os.sep is important for matching directory patterns like 'my_dir/'
             if spec.match_file(str(relative_dir_path) + os.sep) or spec.match_file(
                 str(relative_dir_path)
             ):
                 dirs_to_remove.append(d)
 
         for d_remove in dirs_to_remove:
-            dirs.remove(
-                d_remove
-            )  # Modify dirs in-place for os.walk to skip ignored directories
+            dirs.remove(d_remove)
 
         for f in files:
             file_path_abs = current_path / f
@@ -135,25 +125,24 @@ def _create_snapshot_logic(source_path: Path, output_dir: Path, verbose: bool = 
         with py7zr.SevenZipFile(output_filepath, "w") as archive:
             for relative_file in actual_files_to_archive_relative:
                 full_path = repo_root / relative_file
-                # Use app_name as prefix for path inside archive
                 archive.write(full_path, arcname=str(app_name / relative_file))
         click.echo(f"Successfully created snapshot: {output_filepath}")
 
     except py7zr.Bad7zFile as e:
         if output_filepath.exists():
-            output_filepath.unlink()  # Clean up incomplete archive
+            output_filepath.unlink()
         raise GitSnapshotException(
             f"Error creating 7z archive: {e}. The file might be corrupted or there was an issue with compression."
         ) from e
     except PermissionError as e:
         if output_filepath.exists():
-            output_filepath.unlink()  # Clean up incomplete archive
+            output_filepath.unlink()
         raise GitSnapshotException(
             f"Permission denied: Cannot write to {output_filepath}. Check directory permissions."
         ) from e
     except Exception as e:
         if output_filepath.exists():
-            output_filepath.unlink()  # Clean up incomplete archive
+            output_filepath.unlink()
         raise GitSnapshotException(
             f"An unexpected error occurred during compression: {e}"
         ) from e
@@ -203,7 +192,6 @@ def _restore_snapshot_logic(
         ) from e
 
     stash_filepath: Path | None = None
-    # Use TemporaryDirectory for the stash base directory
     with tempfile.TemporaryDirectory() as temp_dir_str:
         temp_stash_base_dir = Path(temp_dir_str)
         try:
@@ -212,7 +200,6 @@ def _restore_snapshot_logic(
                     click.echo(
                         f"Stashing existing contents of '{target_app_path}' in temporary location..."
                     )
-                # Pass the temporary directory path to _stash_directory_state
                 stash_filepath = _stash_directory_state(
                     target_app_path, temp_stash_base_dir, verbose=verbose
                 )
@@ -230,8 +217,6 @@ def _restore_snapshot_logic(
                         f"Target application directory '{target_app_path}' does not exist, no stash needed."
                     )
 
-            # Exclusions for clearing should now only include the .venv if keep_venv is true.
-            # The 'snapshots' directory exclusion is removed as it's not relevant here.
             exclusions_for_clear: list[Path] = []
 
             if keep_venv:
@@ -293,14 +278,6 @@ def _restore_snapshot_logic(
                 )
                 _remove_directory_robustly(target_app_path, verbose=verbose)
 
-            # Re-raise as GitSnapshotException to exit cleanly via Click
             raise GitSnapshotException(
                 "Restoration failed, see logs above for details."
             ) from e
-
-    # The temporary directory (temp_stash_base_dir) is automatically cleaned up here
-    # when the 'with tempfile.TemporaryDirectory()' block exits, regardless of success or failure.
-
-    # Removed: Clean up the main 'snapshots' directory, as it's not relevant for restore.
-    # snapshots_dir = Path.cwd() / "snapshots"
-    # _remove_dir_if_empty(snapshots_dir, "snapshots", verbose=verbose)

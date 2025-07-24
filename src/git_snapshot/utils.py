@@ -10,8 +10,6 @@ import py7zr
 
 from git_snapshot.exceptions import GitSnapshotException
 
-# Removed: _check_py7zr_installed() function
-
 
 def get_git_root(path: Path) -> Path | None:
     """
@@ -26,9 +24,7 @@ def get_git_root(path: Path) -> Path | None:
         Path | None: The path to the Git repository root if found, otherwise None.
     """
     current_path = path.resolve()
-    while (
-        current_path != current_path.parent
-    ):  # Stop at the root directory (e.g., '/' or 'C:\')
+    while current_path != current_path.parent:
         if (current_path / ".git").is_dir():
             return current_path
         current_path = current_path.parent
@@ -55,7 +51,6 @@ def parse_gitignore(repo_root: Path, verbose: bool = False) -> list[str]:
 
     try:
         with open(gitignore_path, "r", encoding="utf-8") as f:
-            # Strip whitespace and filter out empty lines or comments
             lines = [
                 line.strip()
                 for line in f.readlines()
@@ -81,17 +76,13 @@ def _handle_remove_read_only(func, path: str, exc_info: tuple):
         path (str): The path to the file/directory that caused the error.
         exc_info (tuple): A tuple containing (exception type, exception value, traceback).
     """
-    # Check if the error is an OSError (often PermissionError) and if the path exists
     if issubclass(exc_info[0], OSError) and os.path.exists(path):
         try:
-            # Change permissions to make the file/directory writable
             os.chmod(path, stat.S_IWRITE)
-            func(path)  # Retry the operation that failed
+            func(path)
         except Exception:
-            # If changing permissions and retrying still fails, re-raise the original exception
             raise exc_info[1]
     else:
-        # Re-raise the exception if it's not a permission error or cannot be handled
         raise exc_info[1]
 
 
@@ -126,7 +117,7 @@ def _remove_directory_robustly(
                     err=True,
                 )
             time.sleep(delay)
-            delay *= 1.5  # Exponential backoff
+            delay *= 1.5
         except Exception as e:
             raise GitSnapshotException(f"Error removing {path}: {e}") from e
 
@@ -168,9 +159,7 @@ def _clear_directory_contents(
                     f"Warning: Could not remove file '{item}': {file_e}", err=True
                 )
         elif item.is_dir():
-            _remove_directory_robustly(
-                item, verbose=verbose
-            )  # Recursively remove subdirectories robustly
+            _remove_directory_robustly(item, verbose=verbose)
 
 
 def _stash_directory_state(
@@ -197,7 +186,6 @@ def _stash_directory_state(
     """
     if verbose:
         click.echo(f"Creating a temporary stash of '{directory_to_stash}'...")
-    # No need to create stash_base_dir explicitly here, it's managed by TemporaryDirectory in core.py
 
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     stash_filename = f"restore_stash_{timestamp}.7z"
@@ -213,12 +201,6 @@ def _stash_directory_state(
 
         with py7zr.SevenZipFile(stash_filepath, "w") as archive:
             for item in directory_to_stash.iterdir():
-                # Avoid stashing the main snapshots directory if it happens to be inside
-                # directory_to_stash, though unlikely for typical use cases.
-                # The stash_base_dir itself (temp dir) should never be inside directory_to_stash.
-                # The `Path.cwd() / "snapshots"` exclusion is removed as it's not robust.
-                # Stashing should capture the current state of directory_to_stash,
-                # if snapshots dir is inside, it should be stashed.
                 if item.is_file():
                     archive.write(item, arcname=item.name)
                 elif item.is_dir():
@@ -234,8 +216,6 @@ def _stash_directory_state(
                             )
         return stash_filepath
     except Exception as e:
-        # If stash_filepath was partially created, delete it.
-        # The temporary directory itself will be cleaned up by the caller's context manager.
         if stash_filepath.exists():
             stash_filepath.unlink()
         raise GitSnapshotException(
@@ -263,15 +243,11 @@ def _revert_from_stash(stash_filepath: Path, target_dir: Path, verbose: bool = F
 
     click.echo(f"Attempting to revert '{target_dir}' from stash.")
     try:
-        # Exclusions for clearing should only be for .venv if it's explicitly kept.
-        # The 'snapshots' directory exclusion is removed as it's not relevant here.
         exclusions_for_clear: list[Path] = []
         _clear_directory_contents(target_dir, exclusions_for_clear, verbose=verbose)
 
-        # Recreate the empty target_dir if needed
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        # Extract stash
         with py7zr.SevenZipFile(stash_filepath, mode="r") as z:
             z.extractall(path=target_dir)
         click.echo(f"Successfully reverted '{target_dir}' from stash.")
@@ -292,7 +268,7 @@ def _remove_dir_if_empty(path: Path, description: str, verbose: bool = False):
     """
     if path.is_dir():
         try:
-            if not any(path.iterdir()):  # Check if directory is truly empty
+            if not any(path.iterdir()):
                 path.rmdir()
                 if verbose:
                     click.echo(f"Cleaned up empty {description} directory: {path}")
